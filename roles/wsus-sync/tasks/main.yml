@@ -1,0 +1,11 @@
+##############################################################################
+## main.yml (role Get WSUS sync info)
+## v1.0: 29.11.2018
+###############################################################################
+
+  - name: "ROLE: Get WSUS sync info"
+    win_shell: |
+      $status = (Get-WsusServer).GetSubscription().GetSynchronizationHistory() | where { $_.Result.value__ -eq 1 } | select -First 1
+      $status.EndTime.ToString()
+    register: WsusSync
+    delegate_to: "{{ groups.wsus[0] }}"

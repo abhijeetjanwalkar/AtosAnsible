@@ -1,0 +1,16 @@
+##############################################################################
+## main.yml (role win-patching)
+## v1.1: 30.11.2018
+###############################################################################
+
+  - name: "ROLE: {{ task_name }}"
+    win_updates:
+      category_names:
+        - SecurityUpdates
+        - CriticalUpdates
+        - UpdateRollups
+        - Updates
+        - DefinitionUpdates
+      state: "{{ patch_state }}"
+    register: result
+

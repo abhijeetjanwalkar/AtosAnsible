@@ -1,0 +1,112 @@
+- name:  "Patching - {{ HOSTS }}"
+  hosts: "{{ HOSTS }}"
+  gather_facts: yes
+  vars:
+     date: "{{ lookup('pipe', 'date +\"%Y-%m-%d\"') }}"
+     fulldate: "{{ lookup('pipe', 'date +\"%Y-%m-%d %H:%M:%S\"') }}"
+     HOSTS_COUNT: "{{ ansible_play_hosts | length }}"
+
+  vars_files:
+     - /etc/DPC-ansible.conf
+
+# Main playbook scriptblock
+  tasks:
+    - name: "Generate timestamp varible"
+      local_action: shell date \+'%Y-%m-%d %H:%M:%S'
+      register: timestamp
+      run_once: yes
+
+    - name: "Run role: Get WSUS sync info"
+      include_role:
+        name: wsus-sync
+      run_once: yes
+
+    - name: "Set temporary local facts"
+      set_fact:
+        timestamp_name: "{{ timestamp.stdout | replace('-','') | replace(' ','_') | replace(':','') }}"
+        report_file: "./TempWinReport/{{ HOSTS }}_{{ timestamp.stdout | replace('-','') | replace(' ','_') | replace(':','') }}_report.html"
+      delegate_to: localhost
+      run_once: yes
+
+    - name: "Run role: Windows Update"
+      include_role:
+        name: win-patching
+      vars:
+        task_name: "Running Windows Update"
+        patch_state: installed
+
+    - name: "Restart server if required"
+      win_reboot:
+      when: result.reboot_required
+
+    - name: "Create varible for showing stats"
+      set_fact:
+        message:  "{{ message |default({}) | combine(myelement) }}"
+      vars:
+        myelement: "{ '{{ item.name }}':'{{ item.value }}' }"
+      with_items:
+          - name: "Available patches"
+            value: "{{ result.found_update_count | default(0) }}"
+          - name: "Successfully installed patches: "
+            value: "{{ result.installed_update_count | default(0) }}"
+          - name: "Failed patches"
+            value: "{{ result.failed_update_count | default(0) }}"
+
+    - name: "Statistics"
+      debug:
+        msg: "{{ message }}"
+
+    - name: "Create temp directory for reports"
+      local_action:
+        module: file
+        path: ./TempWinReport
+        state: directory
+      run_once: yes
+
+    - name: "Generate report to temp folder"
+      local_action:
+        module: template
+        src: PostPatchingWindowsReport.j2
+        dest: "{{ report_file }}"
+        newline_sequence: \r\n
+      run_once: yes
+      register: created_report_file
+
+    - name: "Run role: send-mail"
+      include_role:
+        name: send-mail
+      vars:
+        subject: "{{ customer }} - Ansible Windows post-patching report for {{ HOSTS }}."
+        body: >
+          Windows patching for group "{{ HOSTS }}" has been completed.<br>
+          Raport is attached to this email
+        files: "{{ created_report_file.dest }}"
+      run_once: yes
+
+    - name: "Create transfer host for WSUS play"
+      add_host:
+        name: transfer_host
+        report_file: "{{ report_file | basename }}"
+      run_once: yes
+
+# Play: Put reports to WSUS server
+- name: "Put reports to WSUS server"
+  hosts: wsus
+  gather_facts: false
+
+  tasks:
+    - name: "Copy reports to WSUS server"
+      win_copy:
+        src: ./TempWinReport/
+        dest: C:\AnsiblePatchReport\post_patching
+
+    - name: "Delete temporary files and folders"
+      local_action:
+        module: file
+        path: ./TempWinReport
+        state: absent
+
+    - name: "Final message"
+      debug:
+        msg: 'Reports have been uploaded to server {{ inventory_hostname  }} and destination file is: D:\AnsiblePatchReport\post_patching\{{ hostvars.transfer_host.report_file }}'
+

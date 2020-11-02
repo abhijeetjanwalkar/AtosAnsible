@@ -1,0 +1,10 @@
+---
+a_vmware_hostname: glbsavc01.ad.intra.ao-srv.com
+a_vmware_username: 
+a_vmware_password:
+
+a_vmware_datacenter: Server Automation
+a_vmware_folder: Ansible/DEV
+a_vm_snap_name: 24-05-2019
+vm_name: ''
+a_vmware_guest_name: ''

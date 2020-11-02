@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+<head>
+        <title>Ondemand update Windows Report - {{ inventory_hostname }} - {{ timestamp.stdout }}</title>
+
+        <meta charset="UTF-8">
+        <meta name="author" content="Jakub Wosko (a586404)">
+
+        <style>
+        /* Style the header */
+        header {
+                background-color: #666;
+                padding: 5px;
+                text-align: center;
+                font-size: 35px;
+                color: white;
+        }
+
+        article {
+                padding: 20px;
+        }
+        div {
+                        padding: 10px;
+        }
+        table {
+                border-collapse: collapse;
+                text-align: center;
+                margin: 0px auto;
+        }
+        table, th, tr, td {
+                border: 1px solid black;
+        }
+        td, th {
+                padding: 5px;
+        }
+        .report tr:hover {background-color: #f5f5f5;}
+        th {
+                background-color: #4CAF50;
+        }
+        .info th {
+                background-color: #F0F1E9;
+        }
+        .info td {
+                padding: 10px;
+        }
+        .info {
+                margin-bottom: 20px;
+                font-size: 25px;
+        }
+        .legend {
+                width: 570px;
+                margin: auto;
+                font-size: 12px
+        }
+
+        /* Style the footer */
+        footer {
+                background-color: #777;
+                padding: 5px;
+                text-align: left;
+                color: white;
+        }
+        </style>
+</head>
+<body>
+<header>
+        <h1 align="center">Windows ondemand update report</h1>
+</header>
+
+<article>
+        <div class="info">
+        {#<h2 align="center">{{ inventory_hostname }}</h2>#}
+                <table>
+                        <tr>
+                                <th>Execution Time</th>
+                                <th>Customer</th>
+                                <th>Server Name</th>
+                                <th>OS Name</th>
+                        </tr>
+                        <tr>
+                                <td>{{ timestamp.stdout | replace('_',' ') }}</td>
+                                <td>{{ customer }}</td>
+                                <td>{{ inventory_hostname }}</td>
+                                <td>{{ ansible_facts.distribution }}</td>
+                        </tr>
+                </table>
+        </div>
+        <div>
+                <h2 align="center">WSUS repository status</h2>
+                <table>
+                        <tr>
+                                <th>WSUS hostname</th>
+                                <th>Last successful synchronization time</th>
+                        </tr>
+                        <tr>
+                                <td>{{ groups.wsus[0] }}</td>
+                                <td>{{ WsusSync.stdout | string }}</td>
+                        </tr>
+                </table>
+        </div>
+        <div class="report">
+                <h2 align="center">Available updates ({{ result.found_update_count }})</h2>
+                <table>
+                        <tr>
+                                <th>Index</th>
+                                <th>KB number</th>
+                                <th>Update name</th>
+                        </tr>
+                        {% for key, value in result.updates.items() %}
+                        <tr>
+                                <td>{{ loop.index }}</td>
+                                <td>KB{{ value.kb | join(',') }}</td>
+                                <td>{{ value.title }}</td>
+                        </tr>
+                        {% endfor %}
+                </table>
+                <h2 align="center">Installed updates ({{ installed_updates.stdout_lines | count -1 }})</h2>
+                <table>
+                        <tr>
+                                <th>Index</th>
+                                <th>KB number</th>
+                                <th>Update name</th>
+                                <th>Update type</th>
+                                <th>Support URL</th>
+                                <th>Installed date</th>
+                        </tr>
+                        {% for item in installed_updates.stdout_lines[1:] %}
+                        <tr>
+                                {%     set row = item.split(";") %}
+                                <td>{{ loop.index }}</td>
+                                <td>{{ row[0] | replace('"','') }}</td>
+                                <td>{{ row[1] | replace('"','') }}</td>
+                                <td>{{ row[2] | replace('"','') }}</td>
+                                {%     set url = row[3] | replace('"','') %}
+                                <td><a href={{ url }} target=_blank>{{ url }}</a></td>
+                                <td>{{ row[4] | replace('"','') }}</td>
+                        </tr>
+                        {% endfor %}
+                </table>
+        </div>
+</article>
+
+<footer>
+        This report was generated by Ansible Tower.
+</footer>
+
+</body>
+</html>
+

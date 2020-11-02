@@ -1,0 +1,35 @@
+# playbook
+- hosts: "{{ HOSTS }}"
+  gather_facts: yes
+
+  tasks:
+
+###############################
+# LINUX
+
+  - name: Linux RHEL - ping host
+    ping:
+    register: ping_output
+    when: "'RedHat' in ansible_distribution"
+
+  - name: Linux SLES - ping host
+    ping:
+    register: ping_output
+    when: "'SLES' in ansible_distribution"
+
+###############################
+# WINDOWS
+
+  - name: Windows - ping host
+    win_ping:
+    register: ping_output
+    when: "'Windows' in ansible_distribution"
+
+###############################
+# COMMON
+
+  - name: display output
+    debug:
+      msg: "{{ ping_output }}"
+
+      

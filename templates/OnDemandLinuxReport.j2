@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+<head>
+        <title>On demand update report (Linux) </title>
+
+        <meta charset="UTF-8">
+        <meta name="author" content="Jakub Wosko (a586404)">
+
+        <style>
+        /* Style the header */
+        header {
+                background-color: #666;
+                padding: 5px;
+                text-align: center;
+                font-size: 35px;
+                color: white;
+        }
+
+        article {
+                padding: 20px;
+        }
+
+        /* Style the footer */
+        footer {
+                background-color: #777;
+                padding: 5px;
+                text-align: left;
+                color: white;
+        }
+        table {
+                border-collapse: collapse;
+                text-align: center;
+                margin: 0px auto;
+        }
+        table, th, tr, td {
+                border: 1px solid black;
+        }
+        td, th {
+                padding: 5px;
+        }
+        .report tr:hover {background-color: #f5f5f5;}
+        th {
+                background-color: #4CAF50;
+        }
+        .info th {
+                background-color: #F0F1E9;
+        }
+        .info td {
+                padding: 10px;
+        }
+        .info {
+                margin-bottom: 20px;
+                font-size: 25px;
+        }
+        </style>
+</head>
+  <body>
+<header>
+        <h1 align="center">On demand update report (Linux)</h1>
+</header>
+
+<article>
+<div class="info">
+{#<h2 align="center">{{ inventory_hostname }}</h2>#}
+<table>
+<tr>
+<th> Hostname </th>
+<th> System </th>
+<th> Kernel version </th>
+<th> glibc version </th>
+<th> RPMs ready for update </th>
+</tr>
+<tr>
+{% for item in os_info.stdout_lines %}
+{% set row = item.split(";") %}
+<td>{{ row[0] | replace('"','') }}</td>
+<td> {{ ansible_distribution }} {{ ansible_distribution_version }} </td>
+<td>{{ row[1] | replace('"','') }}</td>
+<td>{{ row[2] | replace('"','') }}</td>
+{% endfor %}
+{% for item in number_of_update_rpms.stdout_lines %}
+{%     set row = item.split(";") %}
+<td>{{ row[0] | replace('"','') }}</td>
+{% endfor %}
+</tr>
+</table>
+
+<div class="report">
+<h2 align="center">Available RPMs ({{ number_of_update_rpms.stdout | int }})</h2>
+<table>
+<tr>
+<th> RPM name </th>
+<th> version </th>
+<th> architecture </th>
+</tr>
+{% for item in update_rpms.stdout_lines %}
+<tr>
+{%     set row = item.split(";") %}
+<td>{{ row[0] | replace('"','') }}</td>
+<td>{{ row[1] | replace('"','') }}</td>
+<td>{{ row[2] | replace('"','') }}</td>
+{% endfor %}
+</tr>
+</table>
+
+<h2 align="center">Patches available with RPMs ({{ update_info_value.stdout | int }})</h2>
+<table>
+<tr>
+<th> Patch ID </th>
+<th> Classification </th>
+<th> Additional info </th>
+</tr>
+{% for item in update_info.stdout_lines %}
+<tr>
+{%     set row = item.split(";") %}
+<td>{{ row[0] | replace('"','') }}</td>
+<td>{{ row[1] | replace('"','') }}</td>
+<td>{{ row[2] | replace('"','') }}</td>
+{% endfor %}
+</tr>
+</table>
+
+<h2 align="center">List of installed RPMs ({{ installed_rpms_value.stdout | int }})</h2>
+<table>
+<tr>
+<th> Installation date </th>
+<th> RPM name </th>
+</tr>
+{% for item in installed_rpms.stdout_lines %}
+<tr>
+{%     set row = item.split(";") %}
+<td>{{ row[0] | replace('"','') }}</td>
+<td>{{ row[1] | replace('"','') }}</td>
+{% endfor %}
+</tr>
+
+</table>
+
+</div>
+</article>
+
+<footer>
+Report generated on: {{ timestamp_name }} 
+</footer>
+
+</body>
+</html>

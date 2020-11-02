@@ -1,0 +1,183 @@
+---
+- name:
+  hosts: "{{ HOSTS }}"
+  gather_facts: yes
+  vars:
+    HOSTS_COUNT: "{{ ansible_play_hosts | length }}"
+  vars_files:
+     - /etc/DPC-ansible.conf
+
+  tasks:
+    - name: Check available patches
+      shell: yum check-update | grep '.x86_64\|.noarch\|.i686' | wc -l > /tmp/rpm_pre_patching_value
+      become: yes
+      become_method: sudo
+      become_user: root
+      when: ansible_distribution == "RedHat"
+      args:
+        warn: false
+
+    - shell:  zypper lu | grep ^v | wc -l > /tmp/rpm_pre_patching_value
+      become: yes
+      become_method: sudo
+      become_user: root
+      when: ansible_distribution == "SLES"
+      args:
+        warn: false
+
+    - name: register available RPMs
+      shell: cat /tmp/rpm_pre_patching_value
+      become: yes
+      become_method: sudo
+      become_user: root
+      register: available_rpms
+      ignore_errors: yes
+
+    - set_fact:
+        AVA_RPMS: "{{ available_rpms.stdout }}"
+
+    - name: checking available patches in RPMs
+      become: yes
+      become_method: sudo
+      become_user: root
+      shell: yum updateinfo list | grep '.x86_64\|.noarch\|.i686' | wc -l > /tmp/rpm_patches_value
+      when: ansible_distribution == "RedHat"
+      args:
+        warn: false
+
+    - shell: zypper lp | grep needed | grep -v patche\.*needed | wc -l > /tmp/rpm_patches_value
+      become: yes
+      become_method: sudo
+      become_user: root
+      when: ansible_distribution == "SLES"
+      args:
+        warn: false
+
+    - name: register available patches in RPMs
+      shell: cat /tmp/rpm_patches_value
+      become: yes
+      become_method: sudo
+      become_user: root
+      register: rpm_patches_value
+      ignore_errors: yes
+
+    - set_fact:
+        AVA_PATCHES: "{{ rpm_patches_value.stdout }}"
+
+    - name: checking number of RPMs
+      become: yes
+      become_method: sudo
+      become_user: root
+      shell: rpm -qa --last | awk '{print $5,$4,$3,$6";"$1";;"}' | sed -e 's/\ /\-/1' -e 's/\ /\-/1' | wc -l > /tmp/rpm_installed_value
+      when: ansible_distribution == "RedHat"
+      args:
+        warn: false
+
+    - shell: rpm -qa --last | awk '{print $5,$4,$3,$6,$1}' | sed -e 's/\ /\-/1' -e 's/\ /\-/1' -e 's/\ /;/2' -e 's/$/;;/' | wc -l > /tmp/rpm_installed_value
+      become: yes
+      become_method: sudo
+      become_user: root
+      when: ansible_distribution == "SLES"
+      args:
+        warn: false
+
+    - name: register data all RPMs
+      become: yes
+      become_method: sudo
+      become_user: root
+      shell: cat /tmp/rpm_installed_value
+      register: rpm_installed_value
+      args:
+        warn: false
+
+    - set_fact:
+        ALL_RPMS: "{{ rpm_installed_value.stdout }}"
+
+    - debug:
+        var: rpm_installed_value.stdout_lines
+
+    - debug:
+        var: available_rpms.stdout_lines
+
+    - name: "Generating the timestamp varible"
+      local_action: shell date \+'%Y-%m-%d %H:%M:%S'
+      register: timestamp
+      run_once: true
+
+    - name: "Generating the timestamp format for report names"
+      set_fact:
+        timestamp_name: "{{ timestamp.stdout | replace('-','') | replace(' ','_') | replace(':','') }}"
+      delegate_to: localhost
+
+    - name: creating localfiles
+      local_action:
+        module: file
+        dest: ./regoutput/
+        state: directory
+      run_once: true
+
+    - name: creating a report file
+      local_action:
+        module: template
+        src: OnDemandLinuxSummaryReport.j2
+        dest: ./regoutput/{{ HOSTS }}.{{ timestamp_name }}.html
+      run_once: true
+
+- name: "Putting the report to the repo (SMT) server"
+  hosts: repo
+  gather_facts: false
+
+  vars_files:
+     - /etc/DPC-ansible.conf
+
+  tasks:
+    - name: "Generating the timestamp varible"
+      local_action: shell date \+'%Y-%m-%d %H:%M:%S'
+      register: timestamp
+      run_once: true
+
+    - name: "Get list of reports files"
+      local_action: shell ls ./regoutput/*
+      register: files
+      run_once: true
+
+    - name: "Copying reports to the repository server"
+      become: yes
+      become_method: sudo
+      become_user: root
+      file: 
+        dest: /data/ansiblepatchreport
+        mode: u=rwX,g=rwX,o=rwX 
+        recurse: yes
+      
+    - copy:
+        src: ./regoutput/
+        dest: /data/ansiblepatchreport/summary_reports/
+        remote_src: no
+
+    - name: "Send reports by mail"
+      mail:
+        subject: "{{ customer }} - Ansible Linux on demand patch summary report for {{ HOSTS }}."
+        from: "{{ from }}"
+        body: >
+          Linux on demand patch summary report for group/hosts "{{ HOSTS }}" has been completed.<br>
+          Please find the attached files.
+        to: "{{ recipients }}"
+        attach: "{{ files.stdout_lines }}"
+        host: "{{ smtp_server }}"
+        port: "{{ smtp_port }}"
+        subtype: html
+        charset: utf8
+      delegate_to: localhost
+      run_once: true
+
+    - name: clean localfiles
+      local_action:
+        module: file
+        dest: ./regoutput/
+        state: absent
+
+    - name: "Generating reports complete"
+      debug:
+        msg: 'The reports have been uploaded successfully to {{ inventory_hostname  }} and placed in /data/ansiblepatchreport/summary_reports'
+

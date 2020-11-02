@@ -1,0 +1,17 @@
+##############################################################################
+## main.yml (role send-mail)
+## v1.0: 29.11.2018
+###############################################################################
+---
+  - name: "ROLE: Send report by mail"
+    mail:
+      subject: "{{ subject }}"
+      from: "{{ from }}"
+      body: "{{ body }}"
+      to: "{{ recipients }}"
+      attach: "{{ files }}"
+      host: "{{ smtp_server }}"
+      port: "{{ smtp_port }}"
+      subtype: html
+      charset: utf8
+    delegate_to: localhost

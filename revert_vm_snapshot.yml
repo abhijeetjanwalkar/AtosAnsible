@@ -1,0 +1,28 @@
+- name: VMware Guests Snapshot restore
+
+  hosts: localhost
+  gather_facts: no
+  # become: true
+  # become_method: sudo
+  # become_user: root
+
+  ####
+  tasks:
+
+  - name: Include variables.yml
+    include_vars:
+     file: variables.yml
+
+
+  - name: Revert to a snapshot
+    vmware_guest_snapshot:
+      #username: "{{ a_vmware_username }}"
+      #password: "{{ a_vmware_password }}"
+      hostname: "{{ a_vmware_hostname }}"
+      datacenter: "{{ a_vmware_datacenter }}"
+      folder: "{{ a_vmware_folder }}"
+      name: "{{ vm_name }}"
+      state: revert
+      snapshot_name: "{{ a_vm_snap_name }}"
+      validate_certs: no
+    delegate_to: localhost

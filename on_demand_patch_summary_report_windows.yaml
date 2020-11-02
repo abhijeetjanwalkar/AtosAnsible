@@ -1,0 +1,119 @@
+- name:  "On demand patch summary report - {{ HOSTS }}"
+  hosts: "{{ HOSTS }}"
+  gather_facts: yes
+  vars:
+     HOSTS_COUNT: "{{ ansible_play_hosts | length }}"
+
+  vars_files:
+     - /etc/DPC-ansible.conf
+
+# Main playbook scriptblock
+  tasks:
+    - name: "Generate timestamp varible"
+      local_action: shell date \+'%Y-%m-%d %H:%M:%S'
+      register: timestamp
+      run_once: yes
+
+    - name: "Run role: Get WSUS sync info"
+      include_role:
+        name: wsus-sync
+      run_once: yes
+
+    - name: "Run role: Check available updates"
+      include_role:
+        name: win-patching
+      vars:
+        task_name: "Checking available updates"
+        patch_state: searched
+
+    - name: "Statistics"
+      debug:
+        msg: "Available patches: {{ result.found_update_count }}"
+
+    - name: "Get installed updates count"
+      win_shell: |
+        $Session = New-Object -ComObject "Microsoft.Update.Session"
+        $Searcher = $Session.CreateUpdateSearcher()
+        $historyCount = $Searcher.GetTotalHistoryCount()
+
+        if ($historyCount -gt 0) {
+            $UpdateHistory = $Searcher.QueryHistory(0, $historyCount)
+            $KBs = $UpdateHistory | foreach { [regex]::match($_.title,'(KB[0-9]{6,7})').value | Where-Object {$_ -ne ""} }
+        }
+
+        $hotfixes = Get-HotFix | select -ExpandProperty Hotfixid
+
+        if ($historyCount -gt 0) {
+            $compare = Compare-Object -ReferenceObject $KBs -DifferenceObject $hotfixes | where SideIndicator -EQ "=>"
+            foreach ($update in $compare.InputObject) {
+                $KBs += $hotfixes[$hotfixes.IndexOf($Update)]
+            }
+        } else { $KBs = $hotfixes }
+
+        $KBs.Count
+      register: installed_updates_count
+
+    - name: "Statistics of installed updates"
+      debug:
+        msg: "Installed updates count: {{ installed_updates_count.stdout | int}}"
+
+    - name: "Generate timestamp format for report names"
+      set_fact:
+        timestamp_name: "{{ timestamp.stdout | replace('-','') | replace(' ','_') | replace(':','') }}"
+      delegate_to: localhost
+      run_once: yes
+
+    - name: "Create temp directory for reports on isolated node"
+      local_action:
+        module: file
+        path: ./TempWinReport
+        state: directory
+      run_once: yes
+
+    - name: "Generate report to temp folder"
+      local_action:
+        module: template
+        src: OnDemandWindowsSummaryReport.j2
+        dest: "./TempWinReport/On_Demand_Patch_Summary_Report_{{ timestamp_name }}.html"
+        newline_sequence: \r\n
+      register: created_report_file
+      run_once: yes
+
+    - name: "Run role: send-mail"
+      include_role:
+        name: send-mail
+      vars:
+        subject: "{{ customer }} - Ansible Windows on demand patch summary report for {{ HOSTS }}."
+        body: >
+          Windows on demand patch summary report for group/hosts "{{ HOSTS }}" has been completed.<br>
+          Raport are attached to this email.
+        files: "{{ created_report_file.dest }}"
+      run_once: yes
+
+    - name: "Create transfer host for WSUS play"
+      add_host:
+        name: transfer_host
+        report_file: "{{ created_report_file.dest | basename }}"
+      run_once: yes
+
+# Play: Put reports to WSUS server
+- name: "Put reports to WSUS server"
+  hosts: wsus
+  gather_facts: false
+
+  tasks:
+    - name: "Copy reports to WSUS server"
+      win_copy:
+        src: ./TempWinReport/
+        dest: D:\AnsiblePatchReport\summary_reports\
+
+    - name: "Delete temporary files and folders"
+      local_action:
+        module: file
+        path: ./TempWinReport
+        state: absent
+
+    - name: "Final message"
+      debug:
+        msg: 'Reports have been uploaded to server {{ inventory_hostname  }} and destination folder is: D:\AnsiblePatchReport\summary_reports\{{ hostvars.transfer_host.report_file }}'
+

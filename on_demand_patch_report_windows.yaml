@@ -1,0 +1,163 @@
+- name:  "On demand report - {{ HOSTS }}"
+  hosts: "{{ HOSTS }}"
+  gather_facts: yes
+  vars:
+     HOSTS_COUNT: "{{ ansible_play_hosts | length }}"
+
+  vars_files:
+     - /etc/DPC-ansible.conf
+
+# Main playbook scriptblock
+  tasks:
+    - name: "Generate timestamp varible"
+      local_action: shell date \+'%Y-%m-%d %H:%M:%S'
+      register: timestamp
+      run_once: true
+
+    - name: "Run role: Get WSUS sync info"
+      include_role:
+        name: wsus-sync
+      #run_once: yes
+
+    - name: "Run role: Check available updates"
+      include_role:
+        name: win-patching
+      vars:
+        task_name: "Checking available updates"
+        patch_state: searched
+
+    - name: "Statistics"
+      debug:
+        msg: "Available patches: {{ result.found_update_count }}"
+
+    - name: "Get installed updates"
+      win_shell: |
+        $Session = New-Object -ComObject "Microsoft.Update.Session"
+        $Searcher = $Session.CreateUpdateSearcher()
+        $historyCount = $Searcher.GetTotalHistoryCount()
+
+         if ($historyCount -gt 0) {
+               $UpdateHistory = $Searcher.QueryHistory(0, $historyCount)
+               $KBs = @()
+
+               foreach ($Update in $UpdateHistory) {
+                    [regex]::match($Update.Title,'(KB[0-9]{6,7})').value | Where-Object {$_ -ne ""} | foreach {
+                        $KB = New-Object -TypeName PSObject
+                        $KB | Add-Member -MemberType NoteProperty -Name KB -Value $_
+                        $KB | Add-Member -MemberType NoteProperty -Name Title -Value $Update.Title
+                        $KB | Add-Member -MemberType NoteProperty -Name Description -Value ""
+                        $KB | Add-Member -MemberType NoteProperty -Name Url -Value $Update.SupportUrl
+                        $KB | Add-Member -MemberType NoteProperty -Name Date -Value $Update.Date.ToString("yyyy-MM-dd")
+                        $KBs += $KB
+                    }
+               }
+        }
+
+        $script = {
+        [void][reflection.assembly]::LoadWithPartialName('Microsoft.UpdateServices.Administration')
+        $wsus = [Microsoft.UpdateServices.Administration.AdminProxy]::GetUpdateServer('localhost',$False,8530)
+        $wsus.GetUpdates().title
+        }
+        $psoptions = New-PSSessionOption -SkipCACheck -SkipCNCheck
+        $WSUSupdatesTitles = Invoke-Command -ComputerName ADEVWGRE1WUS001.devdpc.local -ScriptBlock $script -UseSSL -SessionOption $psoptions
+
+        $hotfixes = @()
+        Get-HotFix | %{
+                $KB = New-Object -TypeName PSObject
+                $KB | Add-Member -MemberType NoteProperty -Name KB -Value $_.Hotfixid
+                $KB | Add-Member -MemberType NoteProperty -Name Title -Value ( ($WSUSupdatesTitles -match $_.Hotfixid) -join ", " )
+                $KB | Add-Member -MemberType NoteProperty -Name Description -Value $_.Description
+                $KB | Add-Member -MemberType NoteProperty -Name Url -Value $_.Site
+                $KB | Add-Member -MemberType NoteProperty -Name Date -Value $_.Installedon.ToString("yyyy-MM-dd")
+                $hotfixes += $KB
+        }
+
+         if ($historyCount -gt 0) {
+                $compare = Compare-Object -ReferenceObject $KBs.KB -DifferenceObject $hotfixes.KB | where SideIndicator -EQ "=>"
+                foreach ($update in $compare.InputObject) {
+                       $KBs += $hotfixes[$hotfixes.KB.IndexOf($Update)]
+               }
+        } else { $KBs = $hotfixes }
+
+        $KBs | sort -Property Date -Descending | ConvertTo-Csv -Delimiter ";" -NoTypeInformation
+      register: installed_updates
+
+    - name: "Statistics of installed updates"
+      debug:
+        msg: "Installed updates count: {{ installed_updates.stdout_lines |count - 1 }}"
+
+    - name: "Generate timestamp format for report names"
+      set_fact:
+        timestamp_name: "{{ timestamp.stdout | replace('-','') | replace(' ','_') | replace(':','') }}"
+      delegate_to: localhost
+      run_once: true
+
+    - name: "Generate temp directory name"
+      set_fact:
+        temp_dir: "./TempWinReport/{{ timestamp_name }}"
+      delegate_to: localhost
+      run_once: true
+
+    - name: "Create temp directory for reports on isolated node"
+      local_action:
+        module: file
+        path: "{{ temp_dir }}"
+        state: directory
+      run_once: true
+
+    - name: "Generate reports to temp folder"
+      local_action:
+        module: template
+        src: OnDemandWindowsReport.j2
+        dest: "{{ temp_dir }}/{{ inventory_hostname  }}_{{ timestamp_name }}_report.html"
+        newline_sequence: \r\n
+      register: created_report_file
+
+    - name: "Get list of reports files"
+      local_action: shell ls  "{{ temp_dir }}"/*
+      register: files
+      run_once: true
+
+    - name: "Send reports by mail"
+      mail:
+        subject: "{{ customer }} - Ansible Windows on demand patch report for {{ HOSTS }}."
+        from: "{{ from }}"
+        body: >
+          Windows on demand patch report for group/hosts "{{ HOSTS }}" has been completed.<br>
+          Raports are attached to this email.
+        to: "{{ recipients }}"
+        attach: "{{ files.stdout_lines }}"
+        host: "{{ smtp_server }}"
+        port: "{{ smtp_port }}"
+        subtype: html
+        charset: utf8
+      delegate_to: localhost
+      run_once: true
+
+    - name: "Create transfer host for WSUS play"
+      add_host:
+        name: transfer_host
+        timestamp: "{{ timestamp_name }}"
+      run_once: true
+
+# Play: Put reports to WSUS server
+- name: "Put reports to WSUS server"
+  hosts: wsus
+  gather_facts: false
+
+  tasks:
+    - name: "Copy reports to WSUS server"
+      win_copy:
+        src: ./TempWinReport/
+        dest: D:\AnsiblePatchReport\on_demand\
+
+    - name: "Delete temporary files and folders"
+      local_action:
+        module: file
+        path: ./TempWinReport
+        state: absent
+
+    - name: "Final message"
+      debug:
+        msg: 'Reports have been uploaded to server {{ inventory_hostname  }} and destination folder is: D:\AnsiblePatchReport\on_demand\{{ hostvars.transfer_host.timestamp }}'
+

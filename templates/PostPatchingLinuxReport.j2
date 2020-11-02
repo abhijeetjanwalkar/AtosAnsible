@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head>
+        <title>Post-patching Linux Report - {{ HOSTS }} - {{ timestamp.stdout }}</title>
+
+        <meta charset="UTF-8">
+        <meta name="author" content="Jakub Wosko (a586404)">
+
+        <style>
+        /* Style the header */
+        header {
+                background-color: #666;
+                padding: 5px;
+                text-align: center;
+                font-size: 35px;
+                color: white;
+        }
+
+        article {
+                padding: 20px;
+        }
+        div {
+                        padding: 10px;
+                }
+        table {
+                border-collapse: collapse;
+                text-align: center;
+                margin: 0px auto;
+        }
+        table, th, tr, td {
+                border: 1px solid black;
+        }
+        td, th {
+                padding: 5px;
+        }
+        tr:hover {background-color: #f5f5f5;}
+        th {
+                background-color: #4CAF50;
+        }
+        .info th {
+                background-color: #F0F1E9;
+        }
+        .info {
+                margin-bottom: 20px;
+                font-size: 25px;
+        }
+        #OK {
+                background-color: #00D600;
+        }
+        #NotOK {
+                background-color: red;
+        }
+        .legend {
+                width: 570px;
+                margin: auto;
+                font-size: 12px
+        }
+
+        /* Style the footer */
+        footer {
+                background-color: #777;
+                padding: 5px;
+                text-align: left;
+                color: white;
+        }
+        </style>
+
+</head>
+<body>
+<header>
+        <h1 align="center">Linux post-patching report</h1>
+</header>
+
+<article>
+        <div class="info">
+                <table>
+                        <tr>
+                                <th>Execution Time</th>
+                                <th>Customer</th>
+                                <th>Machines Group Name</th>
+                                <th>Number of machines</th>
+                        </tr>
+                        <tr>
+                                <td>{{ fulldate }}</td>
+                                <td>{{ customer }}</td>
+                                <td>{{ HOSTS }}</td>
+                                <td>{{ HOSTS_COUNT }}</td>
+                        </tr>
+                </table>
+        </div>
+
+        </div>
+
+        <div>
+        <table>
+                <tr>
+                        <th> Index </th>
+                        <th> Host name </th>
+                        <th> System </th>
+                        <th> Available RPMs </th>
+                        <th> Successfully installed RPMs </th>
+                        <th> Failed RPMs </th>
+                        <th>Status</th>
+                </tr>
+                {% for host in ansible_play_batch %}
+                <tr>
+                        <td> {{ loop.index }} </td>
+                        <td> {{ host }} </td>
+                        <td> {{ hostvars[host]['ansible_facts'].distribution }} {{ hostvars[host]['ansible_facts'].distribution_version }} </td>
+                        <td> {{ hostvars[host]['PRE_VALUE'] }} </td>
+                        <td> {{ hostvars[host]['PRE_VALUE'] | int - hostvars[host]['POST_VALUE'] | int }} </td>
+                        <td> {{ hostvars[host]['POST_VALUE'] }} </td>
+                        {% if hostvars[host]['POST_VALUE'] | int == 0 %}
+                          {% set state = "OK" %}
+                        {% else %}
+                          {% set state = "NotOK" %}
+                        {% endif %}
+                        <td id="{{ state }}">{{ state }}</td>
+                </tr>
+                {% endfor %}
+        </table>
+        </div>
+<div class="legend">
+        <h3 align="center">Legend</h3>
+
+        <p>
+
+           <b>Machines Group Name</b> – Ansible Tower group containing host names against which the patching has been executed<br>
+           <b>Available RPMs</b> – number of all RPMs needed by the server<br>
+           <b>RPMs installed successfully</b> – number of RPMs successfully installed on the server at the execution time<br>
+           <b>RPMs not installed</b> – number of RPMs not installed on the server at the execution time<br>
+           <b>Status</b> – host patch compliancy status OK/NotOK
+
+        </p>
+
+</div>
+</article>
+
+<footer>
+Report generated on {{ timestamp.stdout }}
+</footer>
+
+</body>
+</html>
+

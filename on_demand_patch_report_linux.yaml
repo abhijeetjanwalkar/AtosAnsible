@@ -1,0 +1,141 @@
+- hosts: "{{ HOSTS }}"
+  gather_facts: yes
+
+  tasks:
+    - name: creating localfiles
+      local_action:
+        module: file
+        path: "./regoutput/"
+        state: directory
+      run_once: true
+      
+    - name: creating tmp files for RedHat
+      shell: |
+        echo $(hostname; echo ';'; uname -rmo; echo ';'; rpm -q glibc | xargs | sed 's/glibc\-//g'; echo ';;') > /tmp/ans_os_info
+        yum check-update |  sed -n '/Loaded/,/Obsoleting/p' | grep '\.x86_64\|\.noarch\|\.i686' | grep ^[^\ ] | sed 's/\./\ /' | awk '{print $1, $3, $2}' | sed -e 's/\ /;/1' -e 's/\ /;/1' -e 's/$/;;/1' > /tmp/ans_update_rpms
+        yum updateinfo list | sed -e 's/\ \+/\ /g' -e 's/\ /;/g' -e 's/$/;;/' | grep '.x86_64\|.noarch\|.i686' > /tmp/ans_update_info
+        rpm -qa --last | awk '{print $5,$4,$3,$6";"$1";;"}' | sed -e 's/\ /\-/1' -e 's/\ /\-/1' > /tmp/ans_installed_rpms
+      when: ansible_distribution == "RedHat"
+
+    - name: creating tmp files for SLES
+      shell: |
+        echo $(hostname; echo ';'; uname -rmo; echo ';'; rpm -q glibc | xargs | sed 's/glibc\-//g'; echo ';;') > /tmp/ans_os_info
+        zypper lu | grep ^v | awk '{print $5,$9,$11}' | sed -e 's/\ /;/1' -e 's/\ /;/1' -e 's/$/;;/1' > /tmp/ans_update_rpms
+        zypper lp | grep needed | sed -e 's/^[^|]*|//g' -e 's/|[^|]*|[^|]*needed//g' -e 's/|//g' -e 's/\ \+/\ /g' -e 's/^\ \+//' -e 's/\ /;/1' -e 's/\ /\//1' -e 's/\ /;/1' -e 's/$/;;/' | grep -v patche\.*needed > /tmp/ans_update_info
+        rpm -qa --last | awk '{print $5,$4,$3,$6,$1}' | sed -e 's/\ /\-/1' -e 's/\ /\-/1' -e 's/\ /;/2' -e 's/$/;;/' > /tmp/ans_installed_rpms
+      when: ansible_distribution == "SLES"
+
+    - name: registering system info
+      shell: cat /tmp/ans_os_info
+      register: os_info
+
+    - name: registering available rpms
+      shell: cat /tmp/ans_update_rpms
+      register: update_rpms
+
+    - name: registering number of available rpms for update
+      shell: cat /tmp/ans_update_rpms | wc -l
+      register: number_of_update_rpms
+
+    - name: registering patches provided with rpms
+      shell: cat  /tmp/ans_update_info
+      register: update_info
+      
+    - name: registering value of patches provided with rpms
+      shell: cat /tmp/ans_update_info | wc -l
+      register: update_info_value
+
+    - name: registering installed RPMs
+      shell: cat /tmp/ans_installed_rpms
+      register: installed_rpms
+      
+    - shell: cat /tmp/ans_installed_rpms | wc -l
+      register: installed_rpms_value
+
+    - name: "Generating the timestamp varible"
+      local_action: shell date \+'%Y-%m-%d %H:%M:%S'
+      register: timestamp
+      run_once: true
+
+    - name: "Generating the timestamp format for report names"
+      set_fact:
+        timestamp_name: "{{ timestamp.stdout | replace('-','') | replace(' ','_') | replace(':','') }}"
+      delegate_to: localhost
+
+    - name: "Generating the timestamp format for directories"
+      set_fact:
+        timestamp_dir: "{{ timestamp.stdout | replace(' ','_') | replace(':','') }}"
+      delegate_to: localhost
+
+    - name: creating a file
+      local_action:
+        module: template
+        src: OnDemandLinuxReport.j2
+        dest: ./regoutput/{{ inventory_hostname }}.{{ timestamp_name }}.html
+
+#    - name: clean tmp files on targets
+#      shell: rm -f /tmp/ans_*
+
+- name: "Putting the reports to the repo (SMT) server"
+  hosts: repo
+  gather_facts: false
+
+  vars_files:
+     - /etc/DPC-ansible.conf
+
+  tasks:
+    - name: "Generating the timestamp varible"
+      local_action: shell date \+'%Y-%m-%d %H:%M:%S'
+      register: timestamp
+      run_once: true
+
+    - name: "Generating the timestamp format for directories"
+      set_fact:
+        timestamp_dir: "{{ timestamp.stdout | replace(' ','_') | replace(':','') }}"
+      delegate_to: localhost
+      
+    - name: "Copying reports to the repository server"
+      become: yes
+      become_method: sudo
+      become_user: root
+      file: 
+        dest: /data/ansiblepatchreport
+        mode: u=rwX,g=rwX,o=rwX 
+        recurse: yes
+
+    - copy:
+        src: ./regoutput/
+        dest: /data/ansiblepatchreport/on_demand/{{ timestamp_dir }}
+        remote_src: no
+
+    - name: "Get list of reports files"
+      local_action: shell ls ./regoutput/*
+      register: files
+      run_once: true
+
+    - name: "Send reports by mail"
+      mail:
+        subject: "{{ customer }} - Ansible Linux on demand patch report for {{ HOSTS }}."
+        from: "{{ from }}"
+        body: >
+          Linux on demand patch report for group/hosts "{{ HOSTS }}" has been completed.<br>
+          Please find the attached files.
+        to: "{{ recipients }}"
+        attach: "{{ files.stdout_lines }}"
+        host: "{{ smtp_server }}"
+        port: "{{ smtp_port }}"
+        subtype: html
+        charset: utf8
+      delegate_to: localhost
+      run_once: true
+
+    - name: clean localfiles
+      local_action:
+        module: file
+        dest: ./regoutput/
+        state: absent
+
+    - name: "Generating reports complete"
+      debug:
+        msg: 'The reports have been uploaded successfully to {{ inventory_hostname  }} and placed in /data/ansiblepatchreport/on_demand/{{ timestamp_dir }}'
+

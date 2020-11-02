@@ -1,0 +1,199 @@
+---
+- name: Reboot a host and wait for it to return
+  hosts: "{{ HOSTS }}"
+  gather_facts: yes
+  vars:
+    HOSTS_COUNT: "{{ ansible_play_hosts | length }}"
+    fulldate: "{{ lookup('pipe', 'date +\"%Y-%m-%d %H:%M:%S\"') }}"
+
+  vars_files:
+     - /etc/DPC-ansible.conf
+
+  tasks:
+
+    - shell: yum check-update | grep '.x86_64\|.noarch\|.i686' | wc -l > /tmp/rpm_pre_patching_value
+      become: yes
+      become_method: sudo
+      become_user: root
+      when: ansible_distribution == "RedHat"
+      args:
+        warn: false
+
+    - shell:  zypper lu | grep ^v | wc -l > /tmp/rpm_pre_patching_value
+      become: yes
+      become_method: sudo
+      become_user: root
+      when: ansible_distribution == "SLES"
+      args:
+        warn: false
+
+    - name: upgrade host (generic)
+      become: yes
+      become_method: sudo
+      become_user: root
+      package:
+        name: '*'
+        state: latest
+      register: upgrade_result
+
+    - name: Reboot once there was a change
+      become: yes
+      become_method: sudo
+      become_user: root
+      shell: "sleep 5 && reboot"
+      async: 1
+      poll: 0
+      when: upgrade_result is changed
+
+    - name: Wait for the reboot to complete if there was a change.
+      wait_for_connection:
+        connect_timeout: 300
+        sleep: 10
+        delay: 10
+        timeout: 500
+      when: upgrade_result is changed
+
+    - name: check status for RedHat
+      shell: |
+        yum check-update | grep '.x86_64\|.noarch\|.i686' | wc -l > /tmp/rpm_post_patching_value
+      become: yes
+      become_method: sudo
+      become_user: root
+      when: ansible_distribution == "RedHat"
+      args:
+        warn: false
+
+    - name: check status for SLES
+      shell: |
+        zypper lu | grep ^v | wc -l > /tmp/rpm_post_patching_value
+      become: yes
+      become_method: sudo
+      become_user: root
+      when: ansible_distribution == "SLES"
+      args:
+        warn: false
+
+    - shell: cat /tmp/rpm_post_patching_value
+      become: yes
+      become_method: sudo
+      become_user: root
+      register: rpm_post_patching_value
+
+    - set_fact:
+        POST_VALUE: "{{ rpm_post_patching_value.stdout }}"
+
+    - shell: cat /tmp/rpm_pre_patching_value
+      become: yes
+      become_method: sudo
+      become_user: root
+      register: rpm_pre_patching_value
+
+    - set_fact:
+        PRE_VALUE: "{{ rpm_pre_patching_value.stdout }}"
+
+    - debug:
+        var: rpm_pre_patching_value.stdout_lines
+
+    - debug:
+        var: rpm_post_patching_value.stdout_lines
+
+#    - shell: rm -f "{{ item }}"
+#      become: yes
+#      become_method: sudo
+#      become_user: root
+#      with_items:
+#        - /tmp/rpm_pre_patching_value
+#        - /tmp/rpm_post_patching_info
+#        - /tmp/rpm_post_patching_value
+#        - /tmp/rpm_post_patching_success_value
+#      args:
+#        warn: false
+
+##### Generating report
+
+    - name: creating localfiles
+      local_action:
+        module: file
+        dest: ./regoutput/
+        state: directory
+      run_once: true
+
+    - shell: chmod 666 /tmp/rpm_p*
+      become: yes
+      become_method: sudo
+      become_user: root
+      args:
+        warn: false
+
+    - name: "Generating the timestamp varible"
+      local_action: shell date \+'%Y-%m-%d %H:%M:%S'
+      register: timestamp
+      run_once: true
+
+    - name: "Generating the timestamp format for report names"
+      set_fact:
+        timestamp_name: "{{ timestamp.stdout | replace('-','') | replace(' ','_') | replace(':','') }}"
+      delegate_to: localhost
+
+    - name: creating a report file
+      local_action:
+        module: template
+        src: PostPatchingLinuxReport.j2
+        dest: ./regoutput/{{ HOSTS }}.{{ timestamp_name }}.html
+      run_once: true
+
+    - name: "Send report by mail"
+      mail:
+        subject: "{{ customer }} - Ansible Linux post-patching report for {{ HOSTS }}."
+        from: "{{ from }}"
+        body: >
+          Linux patching for group "{{ HOSTS }}" has been completed.<br>
+          Please find the attached report.
+        to: "{{ recipients }}"
+        attach: ./regoutput/{{ HOSTS }}.{{ timestamp_name }}.html
+        host: "{{ smtp_server }}"
+        port: "{{ smtp_port }}"
+        subtype: html
+        charset: utf8
+      delegate_to: localhost
+      run_once: true
+
+#    - name: clean tmp files on targets
+#      shell: rm -f /tmp/ans_* /tmp/rpms_p*
+#      args:
+#        warn: false
+#
+#    - name: clean tmp local files
+#      shell: rm -f ./regoutput/ans_post_*
+#      delegate_to: localhost
+#      args:
+#        warn: false
+#
+#- name: "Putting the reports to the repo (SMT) server"
+#  hosts: repo
+#  gather_facts: false
+#
+#  - name: "Copying reports to the repository server"
+#    become: yes
+#    become_method: sudo
+#    become_user: root
+#    file: 
+#      dest: /data/ansiblepatchreport
+#      mode: u=rwX,g=rwX,o=rwX 
+#      recurse: yes
+#    
+#  - copy:
+#      src: ./regoutput/
+#      dest: /data/ansiblepatchreport/post_patching/
+#
+#  - name: clean local files
+#    local_action:
+#      module: file
+#      dest: ./regoutput
+#      state: absent
+#
+#  - name: "Generating reports complete"
+#    debug:
+#      msg: 'The report has been uploaded successfully to {{ inventory_hostname }} and placed as /data/ansiblepatchreport/post_patching/{{ HOSTS }}.{{ timestamp_name }}.html'
+#
+#
