@@ -131,6 +131,8 @@
         port: "{{ smtp_port }}"
         subtype: html
         charset: utf8
+        username: "{{ smtp_user }}"
+        password: "{{ smtp_password }}"
       delegate_to: localhost
       run_once: true
 
