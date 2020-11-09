@@ -120,7 +120,7 @@
 
     - name: "show nonencrpted password for testing"
       debug:
-        msg: "password is {{ smtp_password }}"
+        msg: "my user is {{ smtp_user }} password is {{ smtp_password }}"
     
     - name: "Send reports by mail"
       mail:
