@@ -132,7 +132,7 @@
         subtype: html
         charset: utf8
         username: "{{ smtp_user }}"
-        password: "{{ smtp_password }}"
+        password: Atos@12345
       delegate_to: localhost
       run_once: true
 
