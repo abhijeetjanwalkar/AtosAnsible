@@ -129,10 +129,11 @@
         attach: "{{ files.stdout_lines }}"
         host: "{{ smtp_server }}"
         port: "{{ smtp_port }}"
+        username: "{{ smtp_user }}"
+        password: "{{ smtp_password }}"
         subtype: html
         charset: utf8
-        username: "{{ smtp_user }}"
-        password: Atos@12345
+        secure: never
       delegate_to: localhost
       run_once: true
 
