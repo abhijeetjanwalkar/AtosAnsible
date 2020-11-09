@@ -133,7 +133,6 @@
         password: Atos12345
         subtype: html
         charset: utf8
-        secure: try
       delegate_to: localhost
       run_once: true
 
@@ -163,4 +162,3 @@
     - name: "Final message"
       debug:
         msg: 'Reports have been uploaded to server {{ inventory_hostname  }} and destination folder is: D:\AnsiblePatchReport\on_demand\{{ hostvars.transfer_host.timestamp }}'
-
