@@ -137,7 +137,6 @@
         password: "{{ smtp_password }}"
         subtype: html
         charset: utf8
-        secure: never
       delegate_to: localhost
       run_once: true
 
