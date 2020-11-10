@@ -117,11 +117,7 @@
       local_action: shell ls  "{{ temp_dir }}"/*
       register: files
       run_once: true
-
-    - name: "show nonencrpted password for testing"
-      debug:
-        msg: "my user is {{ smtp_user }} password is {{ smtp_password }}"
-    
+   
     - name: "Send reports by mail"
       mail:
         subject: "{{ customer }} - Ansible Windows on demand patch report for {{ HOSTS }}."
